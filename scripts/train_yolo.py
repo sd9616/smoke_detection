@@ -12,6 +12,9 @@ if str(_ROOT) not in sys.path:
 import argparse
 
 from ultralytics import YOLO
+
+
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, required=True, help="dataset.yaml")
     ap.add_argument("--model", type=str, default="yolo11s.pt", help="Ultralytics weight name or path")
