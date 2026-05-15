@@ -22,7 +22,12 @@ def main() -> None:
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--device", type=str, default="")
-    ap.add_argument("--project", type=Path, default=Path("runs/detect"))
+    ap.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="Results root (default: Ultralytics runs/detect). Do not pass runs/detect — that double-nests paths.",
+    )
     ap.add_argument("--name", type=str, default="smoke_uav")
     ap.add_argument("--patience", type=int, default=40)
     args = ap.parse_args()
@@ -33,7 +38,6 @@ def main() -> None:
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
-        project=str(args.project),
         name=args.name,
         patience=args.patience,
         mosaic=1.0,
@@ -43,7 +47,11 @@ def main() -> None:
         scale=0.55,
         fliplr=0.5,
         exist_ok=True,
+        show_labels=True,
+        show_conf=True,
     )
+    if args.project is not None:
+        train_kw["project"] = str(args.project)
     if args.device:
         train_kw["device"] = args.device
     model.train(**train_kw)

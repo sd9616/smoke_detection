@@ -22,6 +22,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from smoke_pipeline.composite import build_composite, composite_xyxy_to_original, nms_numpy
+from smoke_pipeline.viz import draw_detection, resolve_class_name
 
 
 def main() -> None:
@@ -36,6 +37,7 @@ def main() -> None:
     args = ap.parse_args()
 
     model = YOLO(str(args.weights))
+    class_names = model.names
     src = args.source.expanduser().resolve()
     out = args.out.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -70,20 +72,10 @@ def main() -> None:
             txt_path.unlink()
 
         for box, cf, c in zip(mapped, scores, cls):
-            x1, y1, x2, y2 = map(int, box)
-            cv2.rectangle(bgr, (x1, y1), (x2, y2), (40, 199, 40), 2)
-            cv2.putText(
-                bgr,
-                f"{c}:{cf:.2f}",
-                (x1, max(0, y1 - 4)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (40, 199, 40),
-                1,
-                cv2.LINE_AA,
-            )
+            draw_detection(bgr, box, int(c), float(cf), class_names)
             if args.save_txt:
-                line = f"{c} {cf:.5f} " + " ".join(f"{v:.2f}" for v in box)
+                cname = resolve_class_name(class_names, int(c))
+                line = f"{cname} {cf:.5f} " + " ".join(f"{v:.2f}" for v in box)
                 with txt_path.open("a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
 
