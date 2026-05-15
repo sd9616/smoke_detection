@@ -1,0 +1,40 @@
+Smoke UAV pipeline (YOLO11 + Jung-style composite)
+=================================================
+
+1) Python env (from this folder):
+   python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
+2) Download FASDD from Science Data Bank (DOI 10.57760/sciencedb.j00104.00103).
+
+   UAV-only (recommended for this project): FASDD_UAV.zip (~14 GB), e.g.
+   https://www.scidb.cn/en/file?fid=9456106d26c5fc6b74143c3707115d39&mode=front
+   Unpack it; the tree matches other FASDD drops (images/ + annotations/YOLO/).
+
+   Broader CV set: FASDD_CV.zip still exists; UAV is mixed in there unless you
+   use the dedicated FASDD_UAV.zip above.
+
+3) Stage A — YOLO layout (use --all-images for FASDD_UAV; filter only for FASDD_CV):
+   Unpack the zip under this project, e.g. data/FASDD_UAV/ with images/ and annotations/YOLO/.
+
+   Full UAV split:
+   python scripts/prepare_uav_subset.py --fasdd-root data/FASDD_UAV --out data/fasdd_uav_yolo --all-images
+
+   0.1% subset (quick test; same seed is reproducible):
+   python scripts/prepare_uav_subset.py --fasdd-root data/FASDD_UAV --out data/fasdd_uav_0p1pct --all-images --sample-frac 0.001 --sample-seed 42
+
+   For mixed CV instead: --fasdd-root /path/to/FASDD_CV and tune --uav-substrings.
+   Old flag --fasdd-cv still works as an alias for --fasdd-root.
+
+4) Stage B — build composite training tiles (matches training to inference):
+   python scripts/build_composite_dataset.py --in-root data/fasdd_uav_yolo --out-root data/fasdd_uav_composite --size 640
+
+5) Train Ultralytics YOLO11 on the composite dataset.yaml:
+   python scripts/train_yolo.py --data data/fasdd_uav_composite/dataset.yaml --model yolo11s.pt --epochs 100 --batch 16
+
+6) Deploy / visualize with coordinate restore + NMS:
+   python scripts/predict_composite.py --weights runs/detect/smoke_uav/weights/best.pt --source /path/to/uav_frames --conf 0.08
+
+Notes:
+- Open dataset.yaml and confirm class indices (0 fire, 1 smoke) match your label files.
+- Lower --conf in step 6 to reduce missed smoke; tune on validation to hit your FP budget.
+- Jung et al. two-stage classifier on low-confidence crops is not wired here yet; only the composite tiling + restore path is implemented.
