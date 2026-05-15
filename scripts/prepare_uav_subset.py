@@ -2,9 +2,13 @@
 """
 Stage 1: build a lean YOLO layout from unpacked FASDD (Science Data Bank).
 
-Expected layout (same for FASDD_UAV.zip or FASDD_CV.zip):
-  <root>/images/{train,val,test}/...
-  <root>/annotations/YOLO/{train,val,test}/*.txt
+Expected FASDD_UAV layout (flat images + YOLO_UAV list files):
+
+  <root>/images/*.jpg
+  <root>/annotations/YOLO_UAV/labels/*.txt
+  <root>/annotations/YOLO_UAV/{train,val,test}.txt
+
+Also supported: images/{train,val,test}/ with annotations/YOLO/<split>/.
 
 Science Data Bank also publishes a UAV-only archive (FASDD_UAV.zip). After
 unpacking it, pass that folder as --fasdd-root and use --all-images (every
@@ -46,7 +50,11 @@ import random
 import shutil
 from pathlib import Path
 
-from smoke_pipeline.fasdd_paths import images_dir, list_splits, yolo_label_dir
+from smoke_pipeline.fasdd_paths import (
+    collect_split_pairs,
+    is_yolo_uav_list_layout,
+    resolve_splits,
+)
 
 
 def should_keep(path: Path, substrings: list[str]) -> bool:
@@ -101,26 +109,21 @@ def main() -> None:
 
     root = (args.fasdd_root or args.fasdd_cv).expanduser().resolve()
     out = args.out.expanduser().resolve()
-    splits = list_splits(root)
-    if not splits:
+    partitions = resolve_splits(root)
+    if not partitions:
         raise SystemExit(
-            f"No splits under {root / 'images'}. "
-            "Expected unpacked FASDD_UAV or FASDD_CV with images/<split>/."
+            f"No dataset under {root}. "
+            "Expected images/ plus annotations/YOLO_UAV/labels/ and train.txt (etc.), "
+            "or images/<split>/ with annotations/YOLO/<split>/."
         )
+    if is_yolo_uav_list_layout(root):
+        print("using annotations/YOLO_UAV list files (train.txt, val.txt, test.txt)")
 
-    for split in splits:
-        idir = images_dir(root, split)
-        ldir = yolo_label_dir(root, split)
-        if idir is None or ldir is None:
-            print(f"skip split {split}: missing images or annotations/YOLO")
-            continue
-        imgs = sorted(idir.glob("*.jpg")) + sorted(idir.glob("*.png")) + sorted(idir.glob("*.jpeg"))
-        kept = imgs if args.all_images else [p for p in imgs if should_keep(p, args.uav_substrings)]
-        pairs: list[tuple[Path, Path]] = []
-        for im in kept:
-            lab = ldir / f"{im.stem}.txt"
-            if lab.is_file():
-                pairs.append((im, lab))
+    written_splits: list[str] = []
+    for split, _idir, _ldir in partitions:
+        pairs = collect_split_pairs(root, split)
+        if not args.all_images:
+            pairs = [(im, lab) for im, lab in pairs if should_keep(im, args.uav_substrings)]
         if args.sample_frac is not None:
             f = args.sample_frac
             if not 0 < f <= 1:
@@ -144,24 +147,18 @@ def main() -> None:
             n += 1
         note = f" (sample-frac={args.sample_frac}, seed={args.sample_seed})" if args.sample_frac else ""
         print(f"{split}: linked/copied {n} image/label pairs{note}")
+        if n:
+            written_splits.append(split)
 
-    # Ultralytics dataset yaml snippet
     yaml_path = out / "dataset.yaml"
-    yaml_path.write_text(
-        "\n".join(
-            [
-                f"path: {out}",
-                "train: images/train",
-                "val: images/val",
-                "test: images/test",
-                "names:",
-                "  0: fire",
-                "  1: smoke",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    yaml_lines = [f"path: {out}"]
+    for role in ("train", "val", "test"):
+        if role in written_splits:
+            yaml_lines.append(f"{role}: images/{role}")
+    if "train" in written_splits and "val" not in written_splits:
+        yaml_lines.append("val: images/train")
+    yaml_lines.extend(["names:", "  0: fire", "  1: smoke", ""])
+    yaml_path.write_text("\n".join(yaml_lines), encoding="utf-8")
     print(f"wrote {yaml_path} — verify class ids 0/1 match your label files.")
 
 

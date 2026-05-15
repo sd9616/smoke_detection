@@ -21,6 +21,7 @@ import cv2
 from tqdm import tqdm
 
 from smoke_pipeline.composite import build_composite, transform_labels_to_composite
+from smoke_pipeline.fasdd_paths import list_images
 
 
 def main() -> None:
@@ -28,13 +29,26 @@ def main() -> None:
     ap.add_argument("--in-root", type=Path, required=True)
     ap.add_argument("--out-root", type=Path, required=True)
     ap.add_argument("--size", type=int, default=640, help="Square composite edge length")
-    ap.add_argument("--splits", nargs="*", default=["train", "val", "test"])
+    ap.add_argument(
+        "--splits",
+        nargs="*",
+        default=None,
+        help="Splits under images/ (default: all subdirs found in --in-root)",
+    )
     args = ap.parse_args()
 
     src = args.in_root.expanduser().resolve()
     dst = args.out_root.expanduser().resolve()
+    img_root = src / "images"
+    if args.splits:
+        splits = args.splits
+    elif img_root.is_dir():
+        splits = sorted(d.name for d in img_root.iterdir() if d.is_dir())
+    else:
+        splits = []
 
-    for split in args.splits:
+    written_splits: list[str] = []
+    for split in splits:
         idir = src / "images" / split
         ldir = src / "labels" / split
         if not idir.is_dir() or not ldir.is_dir():
@@ -44,7 +58,7 @@ def main() -> None:
         o_lbl = dst / "labels" / split
         o_img.mkdir(parents=True, exist_ok=True)
         o_lbl.mkdir(parents=True, exist_ok=True)
-        imgs = sorted(idir.glob("*.jpg")) + sorted(idir.glob("*.png")) + sorted(idir.glob("*.jpeg"))
+        imgs = list_images(idir)
         for im_path in tqdm(imgs, desc=split):
             lab_path = ldir / f"{im_path.stem}.txt"
             if not lab_path.is_file():
@@ -59,23 +73,17 @@ def main() -> None:
             out_lb = o_lbl / f"{im_path.stem}.txt"
             cv2.imwrite(str(out_im), comp)
             out_lb.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
+        written_splits.append(split)
 
     yaml = dst / "dataset.yaml"
-    yaml.write_text(
-        "\n".join(
-            [
-                f"path: {dst}",
-                "train: images/train",
-                "val: images/val",
-                "test: images/test",
-                "names:",
-                "  0: fire",
-                "  1: smoke",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    yaml_lines = [f"path: {dst}"]
+    for role in ("train", "val", "test"):
+        if role in written_splits:
+            yaml_lines.append(f"{role}: images/{role}")
+    if "train" in written_splits and "val" not in written_splits:
+        yaml_lines.append("val: images/train")
+    yaml_lines.extend(["names:", "  0: fire", "  1: smoke", ""])
+    yaml.write_text("\n".join(yaml_lines), encoding="utf-8")
     print(f"wrote composites under {dst}")
 
 
