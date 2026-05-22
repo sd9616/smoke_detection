@@ -70,6 +70,21 @@ def symlink_relative(src: Path, dst: Path) -> None:
     os.symlink(rel, dst)
 
 
+def smoke_only_lines(lab_path: Path) -> list[str]:
+    """Keep class-1 (smoke) boxes from FASDD labels; remap to class 0."""
+    out: list[str] = []
+    for line in lab_path.read_text(encoding="utf-8").splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 5 and int(parts[0]) == 1:
+            out.append("0 " + " ".join(parts[1:5]))
+    return out
+
+
+def write_label(dst: Path, lines: list[str]) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     src = ap.add_mutually_exclusive_group(required=True)
@@ -105,6 +120,11 @@ def main() -> None:
         default=42,
         help="RNG seed when --sample-frac is set.",
     )
+    ap.add_argument(
+        "--smoke-only",
+        action="store_true",
+        help="Keep only smoke boxes (FASDD class 1), remap to class 0; drop fire boxes.",
+    )
     args = ap.parse_args()
 
     root = (args.fasdd_root or args.fasdd_cv).expanduser().resolve()
@@ -138,9 +158,16 @@ def main() -> None:
         o_lbl.mkdir(parents=True, exist_ok=True)
         n = 0
         for im, lab in pairs:
-            if args.copy:
+            if args.smoke_only:
+                lines = smoke_only_lines(lab)
+                if not lines:
+                    continue
+            if args.copy or args.smoke_only:
                 shutil.copy2(im, o_img / im.name)
-                shutil.copy2(lab, o_lbl / f"{im.stem}.txt")
+                if args.smoke_only:
+                    write_label(o_lbl / f"{im.stem}.txt", lines)
+                else:
+                    shutil.copy2(lab, o_lbl / f"{im.stem}.txt")
             else:
                 symlink_relative(im, o_img / im.name)
                 symlink_relative(lab, o_lbl / f"{im.stem}.txt")
@@ -157,9 +184,14 @@ def main() -> None:
             yaml_lines.append(f"{role}: images/{role}")
     if "train" in written_splits and "val" not in written_splits:
         yaml_lines.append("val: images/train")
-    yaml_lines.extend(["names:", "  0: fire", "  1: smoke", ""])
+    if args.smoke_only:
+        yaml_lines.extend(["names:", "  0: smoke", ""])
+        note = "smoke-only (FASDD class 1 remapped to 0)"
+    else:
+        yaml_lines.extend(["names:", "  0: fire", "  1: smoke", ""])
+        note = "verify class ids 0=fire, 1=smoke match label files"
     yaml_path.write_text("\n".join(yaml_lines), encoding="utf-8")
-    print(f"wrote {yaml_path} — verify class ids 0/1 match your label files.")
+    print(f"wrote {yaml_path} — {note}")
 
 
 if __name__ == "__main__":

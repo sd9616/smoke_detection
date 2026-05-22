@@ -31,8 +31,19 @@ def main() -> None:
     ap.add_argument("--source", type=Path, required=True, help="Image file or directory")
     ap.add_argument("--out", type=Path, default=Path("runs/pred_composite"))
     ap.add_argument("--imgsz", type=int, default=640, help="Must match training composite size")
-    ap.add_argument("--conf", type=float, default=0.12, help="Lower for higher recall")
-    ap.add_argument("--iou", type=float, default=0.55)
+    ap.add_argument(
+        "--conf",
+        type=float,
+        default=0.01,
+        help="Confidence threshold (use ~0.01 for early/smoke-only models; raise for production)",
+    )
+    ap.add_argument("--iou", type=float, default=0.55, help="NMS IoU; lower = fewer overlapping boxes")
+    ap.add_argument(
+        "--max-det",
+        type=int,
+        default=5,
+        help="Max boxes per image after NMS (ground truth often has 1 smoke region)",
+    )
     ap.add_argument("--save-txt", action="store_true")
     args = ap.parse_args()
 
@@ -63,6 +74,9 @@ def main() -> None:
 
         mapped = np.stack([composite_xyxy_to_original(b, meta) for b in xyxy], axis=0)
         keep = nms_numpy(mapped, scores, iou_thresh=args.iou)
+        if args.max_det > 0 and len(keep) > args.max_det:
+            order = np.argsort(scores[keep])[::-1][: args.max_det]
+            keep = [keep[i] for i in order]
         mapped = mapped[keep]
         scores = scores[keep]
         cls = cls[keep]

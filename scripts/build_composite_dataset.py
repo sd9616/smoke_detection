@@ -75,6 +75,16 @@ def main() -> None:
             out_lb.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
         written_splits.append(split)
 
+    src_yaml = src / "dataset.yaml"
+    names_lines = ["names:", "  0: fire", "  1: smoke"]
+    if src_yaml.is_file():
+        raw = src_yaml.read_text(encoding="utf-8").splitlines()
+        if "names:" in raw:
+            i = raw.index("names:")
+            names_lines = raw[i:]
+            while names_lines and not names_lines[-1].strip():
+                names_lines.pop()
+
     yaml = dst / "dataset.yaml"
     yaml_lines = [f"path: {dst}"]
     for role in ("train", "val", "test"):
@@ -82,7 +92,7 @@ def main() -> None:
             yaml_lines.append(f"{role}: images/{role}")
     if "train" in written_splits and "val" not in written_splits:
         yaml_lines.append("val: images/train")
-    yaml_lines.extend(["names:", "  0: fire", "  1: smoke", ""])
+    yaml_lines.extend(names_lines + [""])
     yaml.write_text("\n".join(yaml_lines), encoding="utf-8")
     print(f"wrote composites under {dst}")
 

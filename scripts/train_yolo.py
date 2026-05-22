@@ -30,6 +30,12 @@ def main() -> None:
     )
     ap.add_argument("--name", type=str, default="smoke_uav")
     ap.add_argument("--patience", type=int, default=40)
+    ap.add_argument(
+        "--val-conf",
+        type=float,
+        default=0.01,
+        help="Val/plot confidence so val_batch*_pred.jpg shows boxes on small test runs",
+    )
     args = ap.parse_args()
 
     model = YOLO(args.model)
@@ -49,6 +55,7 @@ def main() -> None:
         exist_ok=True,
         show_labels=True,
         show_conf=True,
+        conf=args.val_conf,
     )
     if args.project is not None:
         train_kw["project"] = str(args.project)

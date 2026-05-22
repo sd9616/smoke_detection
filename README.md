@@ -1,11 +1,12 @@
 # UAV smoke detection (YOLO11 + composite tiling)
 
-Quick dry run on **0.1%** of FASDD UAV data. Assumes you unpacked **`FASDD_UAV.zip`** inside this repo:
+Assumes you unpacked **`FASDD_UAV.zip`** under `data/FASDD_UAV/`:
 
 ```
 data/FASDD_UAV/
-  images/{train,val,test}/
-  annotations/YOLO/{train,val,test}/
+  images/*.jpg
+  annotations/YOLO_UAV/labels/*.txt
+  annotations/YOLO_UAV/{train,val,test}.txt
 ```
 
 ---
@@ -25,22 +26,66 @@ Activate the venv in every new terminal:
 source .venv/bin/activate
 ```
 
+Add `--device 0` on training/inference when a CUDA GPU is available.
+
 ---
 
-## 1. Build 0.1% YOLO subset
+## Safety check preview (recommended)
+
+Before a long train, generate a small gallery that shows **what you should expect**:
+
+| Panel | Meaning |
+|-------|---------|
+| **ground truth** | Human smoke boxes on the original UAV frame |
+| **composite train view** | The 640×640 tile YOLO actually trains on (optional) |
+| **prediction** | Boxes labeled `smoke 0.xx` on the original frame (optional; needs weights) |
+
+**After prepare** (labels + composites only — no GPU training yet):
+
+```bash
+python scripts/safety_check_preview.py \
+  --data-root data/fasdd_smoke_half \
+  --composite-root data/fasdd_smoke_half_composite \
+  --samples-per-split 6
+```
+
+**After training** (add weights to preview inference-style output):
+
+```bash
+python scripts/safety_check_preview.py \
+  --data-root data/fasdd_smoke_half \
+  --composite-root data/fasdd_smoke_half_composite \
+  --weights runs/detect/smoke_half_50ep/weights/best.pt \
+  --conf 0.12 \
+  --max-det 3 \
+  --samples-per-split 6
+```
+
+Open **`runs/safety_check/index.html`** in a browser (also see `runs/safety_check/REPORT.md`).
+
+What to look for:
+
+- GT panels should show **one or a few** cyan **smoke GT** boxes per scene, not hundreds.
+- Prediction panels should show **`smoke`** text (not `0:0.01`); use `--max-det 1` in `predict_composite.py` if you only want the top detection.
+- If predictions are empty, try lower `--conf` on a small model, or finish more training before trusting the check.
+
+---
+
+## 1. Build 0.1% YOLO subset (quick smoke test)
 
 Random **0.1%** of labeled images per split (`--sample-frac 0.001`), fixed seed for reproducibility.
 
 ```bash
 python scripts/prepare_uav_subset.py \
   --fasdd-root data/FASDD_UAV \
-  --out data/fasdd_uav_0p1pct \
+  --out data/fasdd_smoke_0p1pct \
   --all-images \
+  --smoke-only \
   --sample-frac 0.001 \
   --sample-seed 42
 ```
 
-Output: `data/fasdd_uav_0p1pct/images/`, `labels/`, and `dataset.yaml`.
+Output: `data/fasdd_smoke_0p1pct/images/`, `labels/`, and `dataset.yaml` (class `0: smoke` only).
 
 ---
 
@@ -50,12 +95,12 @@ Jung-style composite (global + sky band) so training matches inference.
 
 ```bash
 python scripts/build_composite_dataset.py \
-  --in-root data/fasdd_uav_0p1pct \
-  --out-root data/fasdd_uav_0p1pct_composite \
+  --in-root data/fasdd_smoke_0p1pct \
+  --out-root data/fasdd_smoke_0p1pct_composite \
   --size 640
 ```
 
-Output: `data/fasdd_uav_0p1pct_composite/dataset.yaml`.
+Output: `data/fasdd_smoke_0p1pct_composite/dataset.yaml`.
 
 ---
 
@@ -65,64 +110,160 @@ Use a small model and few epochs on this tiny subset; metrics are not meaningful
 
 ```bash
 python scripts/train_yolo.py \
-  --data data/fasdd_uav_0p1pct_composite/dataset.yaml \
+  --data data/fasdd_smoke_0p1pct_composite/dataset.yaml \
   --model yolo11n.pt \
-  --epochs 5 \
+  --epochs 25 \
   --imgsz 640 \
   --batch 8 \
-  --name smoke_uav_0p1pct
+  --name smoke_0p1pct_test \
+  --val-conf 0.01 \
+  --device 0
 ```
 
-Weights: `runs/detect/smoke_uav_0p1pct/weights/best.pt`
-
-Add `--device 0` if you have a CUDA GPU.
+Weights: `runs/detect/smoke_0p1pct_test/weights/best.pt`
 
 ---
 
 ## 4. Run inference on held-out images
 
-Use original (non-composite) frames, e.g. the test split:
+Use **original** (non-composite) frames — do not pass `*_composite/images/` into `predict_composite.py` (it will tile twice).
 
 ```bash
 python scripts/predict_composite.py \
-  --weights runs/detect/smoke_uav_0p1pct/weights/best.pt \
-  --source data/fasdd_uav_0p1pct/images/test \
+  --weights runs/detect/smoke_0p1pct_test/weights/best.pt \
+  --source data/fasdd_smoke_0p1pct/images/val \
   --imgsz 640 \
-  --conf 0.08 \
-  --out runs/pred_0p1pct_test
+  --conf 0.01 \
+  --max-det 3 \
+  --out runs/pred_smoke_0p1pct_val
 ```
 
-Visualizations: `runs/pred_0p1pct_test/*.jpg` with boxes and confidence scores.
+Boxes are labeled **`smoke`** with confidence (e.g. `smoke 0.12`). Raise `--conf` after training on more data; use `--max-det 1` for a single best box per image.
 
 Optional per-detection text files:
 
 ```bash
 python scripts/predict_composite.py \
-  --weights runs/detect/smoke_uav_0p1pct/weights/best.pt \
-  --source data/fasdd_uav_0p1pct/images/test \
+  --weights runs/detect/smoke_0p1pct_test/weights/best.pt \
+  --source data/fasdd_smoke_0p1pct/images/test \
   --imgsz 640 \
-  --conf 0.08 \
-  --out runs/pred_0p1pct_test \
+  --conf 0.01 \
+  --max-det 3 \
+  --out runs/pred_smoke_0p1pct_test \
   --save-txt
 ```
 
-Lower `--conf` (e.g. `0.05`) if you want fewer missed smoke plumes at the cost of more false positives.
+---
+
+## 50% smoke-only run (recommended before full training)
+
+Random **50%** of smoke-labeled images per split, **50 epochs**, `yolo11s`. Expect on the order of **~3–6 hours** end-to-end on a mid-range GPU (prepare + composite + train).
+
+### 1. Prepare 50% subset
+
+```bash
+python scripts/prepare_uav_subset.py \
+  --fasdd-root data/FASDD_UAV \
+  --out data/fasdd_smoke_half \
+  --all-images \
+  --smoke-only \
+  --sample-frac 0.5 \
+  --sample-seed 42
+```
+
+### 2. Build composites
+
+```bash
+python scripts/build_composite_dataset.py \
+  --in-root data/fasdd_smoke_half \
+  --out-root data/fasdd_smoke_half_composite \
+  --size 640
+```
+
+### 3. Train (50 epochs)
+
+```bash
+python scripts/train_yolo.py \
+  --data data/fasdd_smoke_half_composite/dataset.yaml \
+  --model yolo11s.pt \
+  --epochs 50 \
+  --imgsz 640 \
+  --batch 16 \
+  --name smoke_half_50ep \
+  --val-conf 0.15 \
+  --device 0
+```
+
+Weights: `runs/detect/smoke_half_50ep/weights/best.pt`
+
+Use `--batch 8` if GPU memory is limited (e.g. 8 GB).
+
+### 4. Safety check + inference
+
+Preview val/train samples (same style as final deployment):
+
+```bash
+python scripts/safety_check_preview.py \
+  --data-root data/fasdd_smoke_half \
+  --composite-root data/fasdd_smoke_half_composite \
+  --weights runs/detect/smoke_half_50ep/weights/best.pt \
+  --conf 0.12 \
+  --max-det 3
+```
+
+Full val folder export:
+
+```bash
+python scripts/predict_composite.py \
+  --weights runs/detect/smoke_half_50ep/weights/best.pt \
+  --source data/fasdd_smoke_half/images/val \
+  --imgsz 640 \
+  --conf 0.12 \
+  --max-det 3 \
+  --out runs/pred_smoke_half_val
+```
+
+Tune `--conf` (e.g. `0.08–0.25`) on val to balance missed smoke vs. false positives.
 
 ---
 
 ## Checklist
 
-| Step | Script | Main output |
-|------|--------|-------------|
-| 1 | `scripts/prepare_uav_subset.py` | `data/fasdd_uav_0p1pct/` |
-| 2 | `scripts/build_composite_dataset.py` | `data/fasdd_uav_0p1pct_composite/` |
-| 3 | `scripts/train_yolo.py` | `runs/detect/smoke_uav_0p1pct/weights/best.pt` |
-| 4 | `scripts/predict_composite.py` | `runs/pred_0p1pct_test/` |
+| Step | Script | 0.1% output | 50% output |
+|------|--------|-------------|------------|
+| 1 | `scripts/prepare_uav_subset.py` | `data/fasdd_smoke_0p1pct/` | `data/fasdd_smoke_half/` |
+| 2 | `scripts/build_composite_dataset.py` | `data/fasdd_smoke_0p1pct_composite/` | `data/fasdd_smoke_half_composite/` |
+| 3 | `scripts/train_yolo.py` | `runs/detect/smoke_0p1pct_test/weights/best.pt` | `runs/detect/smoke_half_50ep/weights/best.pt` |
+| Safety | `scripts/safety_check_preview.py` | `runs/safety_check/` | `runs/safety_check/` |
+| 4 | `scripts/predict_composite.py` | `runs/pred_smoke_0p1pct_val/` | `runs/pred_smoke_half_val/` |
 
-Before training, open `dataset.yaml` and confirm class ids (`0: fire`, `1: smoke`) match a few label `.txt` files.
+`--smoke-only` keeps FASDD class `1` (smoke) and drops fire boxes; labels use class `0: smoke` in `dataset.yaml`.
 
 ---
 
 ## Full dataset
 
-For production training, repeat steps 1–4 without `--sample-frac`, using e.g. `data/fasdd_uav_yolo` and `data/fasdd_uav_composite`, a larger model (`yolo11s.pt`), and more epochs (`--epochs 100`).
+For production training, repeat the 50% steps without `--sample-frac`, using e.g. `data/fasdd_smoke_yolo` and `data/fasdd_smoke_composite`, `--epochs 100`, and the same `--smoke-only` flag.
+
+```bash
+python scripts/prepare_uav_subset.py \
+  --fasdd-root data/FASDD_UAV \
+  --out data/fasdd_smoke_yolo \
+  --all-images \
+  --smoke-only
+
+python scripts/build_composite_dataset.py \
+  --in-root data/fasdd_smoke_yolo \
+  --out-root data/fasdd_smoke_composite \
+  --size 640
+
+python scripts/train_yolo.py \
+  --data data/fasdd_smoke_composite/dataset.yaml \
+  --model yolo11s.pt \
+  --epochs 100 \
+  --imgsz 640 \
+  --batch 16 \
+  --name smoke_full_100ep \
+  --val-conf 0.15 \
+  --device 0
+```
