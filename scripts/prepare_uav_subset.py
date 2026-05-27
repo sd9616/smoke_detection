@@ -63,6 +63,13 @@ def should_keep(path: Path, substrings: list[str]) -> bool:
 
 
 def symlink_relative(src: Path, dst: Path) -> None:
+    # Avoid "File exists" / self-link surprises when re-running.
+    try:
+        if src.resolve() == dst.resolve():
+            return
+    except FileNotFoundError:
+        # If either side doesn't exist yet, proceed to create the link.
+        pass
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists() or dst.is_symlink():
         dst.unlink()
@@ -83,6 +90,27 @@ def smoke_only_lines(lab_path: Path) -> list[str]:
 def write_label(dst: Path, lines: list[str]) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def copy2_if_different(src: Path, dst: Path) -> None:
+    """
+    Copy src->dst unless they already refer to the same file.
+
+    This makes the script idempotent across re-runs and protects against cases
+    where the output tree already contains symlinks/hardlinks back into src.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if src.resolve() == dst.resolve():
+            return
+    except FileNotFoundError:
+        # If either side doesn't exist yet, fall through to a normal copy.
+        pass
+    try:
+        shutil.copy2(src, dst)
+    except shutil.SameFileError:
+        # Defensive: Python may still detect sameness via inode checks.
+        return
 
 
 def main() -> None:
@@ -163,11 +191,11 @@ def main() -> None:
                 if not lines:
                     continue
             if args.copy or args.smoke_only:
-                shutil.copy2(im, o_img / im.name)
+                copy2_if_different(im, o_img / im.name)
                 if args.smoke_only:
                     write_label(o_lbl / f"{im.stem}.txt", lines)
                 else:
-                    shutil.copy2(lab, o_lbl / f"{im.stem}.txt")
+                    copy2_if_different(lab, o_lbl / f"{im.stem}.txt")
             else:
                 symlink_relative(im, o_img / im.name)
                 symlink_relative(lab, o_lbl / f"{im.stem}.txt")

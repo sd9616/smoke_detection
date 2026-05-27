@@ -38,9 +38,20 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    data_path = args.data.expanduser().resolve()
+    if not data_path.is_file():
+        composite_hint = data_path.parent.name.replace("_composite", "")
+        raise SystemExit(
+            f"Missing {data_path}\n"
+            "Build composites first (step 2), e.g.:\n"
+            f"  python scripts/build_composite_dataset.py "
+            f"--in-root data/{composite_hint} "
+            f"--out-root {data_path.parent} --size 640"
+        )
+
     model = YOLO(args.model)
     train_kw: dict = dict(
-        data=str(args.data.expanduser().resolve()),
+        data=str(data_path),
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
