@@ -4,3 +4,7 @@ opencv-python-headless>=4.8.0
 PyYAML>=6.0
 tqdm>=4.66.0
 numpy>=1.26.0
+# Pyro-SDIS export from Hugging Face
+datasets>=2.18.0
+huggingface_hub>=0.23.0
+Pillow>=10.0.0

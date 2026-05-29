@@ -76,7 +76,7 @@ def main() -> None:
         written_splits.append(split)
 
     src_yaml = src / "dataset.yaml"
-    names_lines = ["names:", "  0: fire", "  1: smoke"]
+    names_lines = ["names:", "  0: smoke"]
     if src_yaml.is_file():
         raw = src_yaml.read_text(encoding="utf-8").splitlines()
         if "names:" in raw:

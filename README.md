@@ -267,3 +267,79 @@ python scripts/train_yolo.py \
   --val-conf 0.15 \
   --device 0
 ```
+
+---
+
+## Pyro-SDIS (Hugging Face, fixed cameras + composite crops)
+
+[pyronear/pyro-sdis](https://huggingface.co/datasets/pyronear/pyro-sdis) — ~33.6k frames from Pyronear wildfire cameras (train/val, single-class smoke). Images are ~1280px; smoke boxes are often small and in the upper sky band.
+
+This repo uses the same **composite cropping** as FASDD UAV training: top half = full-frame letterbox, bottom half = sky crop above an estimated horizon — so YOLO trains on enlarged smoke regions without a second forward pass at inference.
+
+### 0. Extra dependencies
+
+```bash
+pip install datasets huggingface_hub
+```
+
+### 1. Download and export YOLO layout (~3.3 GB)
+
+```bash
+python scripts/prepare_pyro_sdis.py --out data/pyro_sdis_yolo
+```
+
+Quick test (20 images per split):
+
+```bash
+python scripts/prepare_pyro_sdis.py --out data/pyro_sdis_yolo_tiny --max-samples 20
+```
+
+Optional: only frames with at least one smoke box (~28k images):
+
+```bash
+python scripts/prepare_pyro_sdis.py --out data/pyro_sdis_yolo --labeled-only
+```
+
+### 2. Build composite training tiles
+
+```bash
+python scripts/build_composite_dataset.py \
+  --in-root data/pyro_sdis_yolo \
+  --out-root data/pyro_sdis_yolo_composite \
+  --size 640
+```
+
+### 3. Train YOLO11
+
+```bash
+python scripts/train_pyro_sdis.py \
+  --data data/pyro_sdis_yolo_composite/dataset.yaml \
+  --epochs 50 \
+  --batch 16 \
+  --name pyro_sdis_composite \
+  --device 0
+```
+
+Or use `scripts/train_yolo.py` directly with the same `--data` path.
+
+Weights: `runs/detect/pyro_sdis_composite/weights/best.pt`
+
+### 4. Inference on val frames
+
+Use **original** images (not composite tiles):
+
+```bash
+python scripts/predict_composite.py \
+  --weights runs/detect/pyro_sdis_composite/weights/best.pt \
+  --source data/pyro_sdis_yolo/images/val \
+  --conf 0.12 \
+  --max-det 3 \
+  --out runs/pred_pyro_sdis_val
+```
+
+| Step | Script | Output |
+|------|--------|--------|
+| 1 | `scripts/prepare_pyro_sdis.py` | `data/pyro_sdis_yolo/` |
+| 2 | `scripts/build_composite_dataset.py` | `data/pyro_sdis_yolo_composite/` |
+| 3 | `scripts/train_pyro_sdis.py` | `runs/detect/pyro_sdis_composite/weights/best.pt` |
+| 4 | `scripts/predict_composite.py` | `runs/pred_pyro_sdis_val/` |
