@@ -343,3 +343,72 @@ python scripts/predict_composite.py \
 | 2 | `scripts/build_composite_dataset.py` | `data/pyro_sdis_yolo_composite/` |
 | 3 | `scripts/train_pyro_sdis.py` | `runs/detect/pyro_sdis_composite/weights/best.pt` |
 | 4 | `scripts/predict_composite.py` | `runs/pred_pyro_sdis_val/` |
+
+---
+
+## RT-DETR vs YOLO11 on FASDD_UAV (same dataset)
+
+Train RT-DETR on the **same `dataset.yaml`** as YOLO11 so val mAP / precision / recall are comparable.
+
+### 1. Use the same prepared data as your YOLO run
+
+If you already trained `smoke_full_100ep`, reuse that composite export:
+
+```text
+data/fasdd_smoke_composite/dataset.yaml   # or fasdd_smoke_half_composite, etc.
+```
+
+If not prepared yet, follow [Full dataset](#full-dataset) (prepare → composite).
+
+### 2. Train RT-DETR (matched epochs / resolution)
+
+From the repo root (`smoke_detection/`):
+
+```bash
+python scripts/train_rtdetr.py \
+  --data data/fasdd_smoke_composite/dataset.yaml \
+  --model rtdetr-l.pt \
+  --epochs 100 \
+  --imgsz 640 \
+  --batch 8 \
+  --name rtdetr_l_fasdd_full \
+  --val-conf 0.15 \
+  --device 0
+```
+
+Weights: `runs/detect/rtdetr_l_fasdd_full/weights/best.pt`
+
+Use `--batch 8` (or lower) if GPU memory is tight — RT-DETR is heavier than YOLO11s.
+
+### 3. Compare metrics
+
+| Model | Script | Typical results path |
+|-------|--------|----------------------|
+| YOLO11 | `scripts/train_yolo.py` | `runs/detect/smoke_full_100ep/` |
+| RT-DETR | `scripts/train_rtdetr.py` | `runs/detect/rtdetr_l_fasdd_full/` |
+
+Compare `results.csv` and `results.png` in each run folder (mAP50, mAP50-95, precision, recall).
+
+Optional: build a report like the YOLO full run:
+
+```bash
+mkdir -p artifacts/rtdetr_l_fasdd_full
+ln -sf ../../runs/detect/rtdetr_l_fasdd_full/results.csv artifacts/rtdetr_l_fasdd_full/
+ln -sf ../../runs/detect/rtdetr_l_fasdd_full/weights/best.pt artifacts/rtdetr_l_fasdd_full/
+python scripts/eval_artifacts.py --artifacts artifacts/rtdetr_l_fasdd_full \
+  --image-dir data/fasdd_smoke_yolo/images/val
+```
+
+### Notes
+
+- **Composite tiles:** YOLO11 in this repo trains on composite 640×640 tiles. Point RT-DETR at `*_composite/dataset.yaml` for the same training views.
+- **Raw frames (optional):** To compare both models on original UAV frames without composite, use `data/fasdd_smoke_yolo/dataset.yaml` for **both** `train_yolo.py` and `train_rtdetr.py` (no `build_composite_dataset.py`).
+- **Inference:** YOLO uses `predict_composite.py` on original images. RT-DETR val metrics during training are on the same composite val split; for deployment on full frames use Ultralytics `RTDETR.predict` on `data/fasdd_smoke_yolo/images/val` or add a small predict script later.
+
+The copy under `fire_detection_code/scripts/train_rtdetr.py` defaults to Pyro-SDIS; pass `--data` to point at FASDD:
+
+```bash
+python fire_detection_code/scripts/train_rtdetr.py \
+  --data data/fasdd_smoke_composite/dataset.yaml \
+  --project runs/detect --name rtdetr_l_fasdd_full
+```
