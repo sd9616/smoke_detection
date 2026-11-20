@@ -1,0 +1,17 @@
+# Paired RGB + thermal smoke set.
+# Copy this next to the images and point --data at it.
+#
+# data/rgbt_smoke/
+#   dataset.yaml
+#   images/train/rgb/*.jpg
+#   images/train/thermal/*.jpg    # same filename stem as the RGB frame
+#   images/val/rgb/
+#   images/val/thermal/
+#   labels/train/*.txt            # YOLO class cx cy w h, original RGB frame
+#   labels/val/*.txt
+
+path: data/rgbt_smoke
+train: images/train
+val: images/val
+names:
+  0: smoke

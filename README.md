@@ -412,3 +412,50 @@ python fire_detection_code/scripts/train_rtdetr.py \
   --data data/fasdd_smoke_composite/dataset.yaml \
   --project runs/detect --name rtdetr_l_fasdd_full
 ```
+
+---
+
+## RGB + thermal (YOLO11 + cross-attention)
+
+Paired frames. The RGB stream and the detection head start from the finished YOLO11s smoke run (`runs/detect/smoke_full_100ep/weights/best.pt`) and stay frozen. A second YOLO11 stream reads the thermal frame. Cross-attention mixes the two at P3, P4, and P5. Until those fusion weights move, the detector matches the RGB checkpoint.
+
+RT-DETR-L (`runs/detect/rtdetr_l_fasdd_full`) is the separate RGB attention model. This script does not retrain it.
+
+Layout (same filename stem in `rgb/` and `thermal/`):
+
+```text
+data/rgbt_smoke/
+  dataset.yaml
+  images/train/rgb/
+  images/train/thermal/
+  images/val/rgb/
+  images/val/thermal/
+  labels/train/          # YOLO txt, boxes on the original RGB frame
+  labels/val/
+```
+
+`configs/rgbt_smoke.example.yaml` is a copy of that `dataset.yaml`. Thermal may be 1-channel or 3-channel. A frame with a different size is resized to the RGB frame before the composite tile, using the RGB horizon so both views stay aligned. Training tiles are the same 640×640 composite the smoke checkpoint was trained on.
+
+On the machine that already has the smoke run:
+
+```bash
+python scripts/train_mm_yolo.py \
+  --data data/rgbt_smoke/dataset.yaml \
+  --rgb-weights runs/detect/smoke_full_100ep/weights/best.pt \
+  --epochs 30 \
+  --batch 8 \
+  --device 0
+```
+
+Leave `--rgb-weights` off and the script uses that same path when the file is there. Weights: `runs/detect/mm_yolo_rgbt/weights/best.pt`.
+
+```bash
+python scripts/predict_mm_yolo.py \
+  --weights runs/detect/mm_yolo_rgbt/weights/best.pt \
+  --rgb data/rgbt_smoke/images/val/rgb \
+  --thermal data/rgbt_smoke/images/val/thermal \
+  --conf 0.15 \
+  --out runs/pred_mm_yolo
+```
+
+`--unfreeze-rgb` and `--unfreeze-head` train those copied weights as well. `--no-composite` resizes the raw pair instead of building the composite tile.
