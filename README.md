@@ -415,47 +415,32 @@ python fire_detection_code/scripts/train_rtdetr.py \
 
 ---
 
-## RGB + thermal (YOLO11 + cross-attention)
+## Two models
 
-Paired frames. The RGB stream and the detection head start from the finished YOLO11s smoke run (`runs/detect/smoke_full_100ep/weights/best.pt`) and stay frozen. A second YOLO11 stream reads the thermal frame. Cross-attention mixes the two at P3, P4, and P5. Until those fusion weights move, the detector matches the RGB checkpoint.
+These stay separate. YOLO is the model for the raw frames. RT-DETR is the attention model, trained on the prepared images.
 
-RT-DETR-L (`runs/detect/rtdetr_l_fasdd_full`) is the separate RGB attention model. This script does not retrain it.
+| Model | Data | Train | Weights |
+|-------|------|-------|---------|
+| YOLO11s | Raw frames. The finished run is reused. | not run again | `runs/detect/smoke_full_100ep/weights/best.pt` |
+| Attention (RT-DETR-L) | Composite images (`data/fasdd_smoke_composite`) | `scripts/train_attention.py` | `runs/detect/rtdetr_l_fasdd_full/weights/best.pt`, or `runs/detect/attention_images/weights/best.pt` after a new run |
 
-Layout (same filename stem in `rgb/` and `thermal/`):
-
-```text
-data/rgbt_smoke/
-  dataset.yaml
-  images/train/rgb/
-  images/train/thermal/
-  images/val/rgb/
-  images/val/thermal/
-  labels/train/          # YOLO txt, boxes on the original RGB frame
-  labels/val/
-```
-
-`configs/rgbt_smoke.example.yaml` is a copy of that `dataset.yaml`. Thermal may be 1-channel or 3-channel. A frame with a different size is resized to the RGB frame before the composite tile, using the RGB horizon so both views stay aligned. Training tiles are the same 640×640 composite the smoke checkpoint was trained on.
-
-On the machine that already has the smoke run:
+If the YOLO checkpoint is already on the machine, `train_attention.py` does not train it again. It only trains RT-DETR, and it skips that too when an attention checkpoint is already present.
 
 ```bash
-python scripts/train_mm_yolo.py \
-  --data data/rgbt_smoke/dataset.yaml \
-  --rgb-weights runs/detect/smoke_full_100ep/weights/best.pt \
-  --epochs 30 \
+python scripts/train_attention.py \
+  --data data/fasdd_smoke_composite/dataset.yaml \
+  --epochs 100 \
   --batch 8 \
   --device 0
 ```
 
-Leave `--rgb-weights` off and the script uses that same path when the file is there. Weights: `runs/detect/mm_yolo_rgbt/weights/best.pt`.
+Run YOLO on raw frames with `scripts/predict_composite.py`. Run the attention model on the images:
 
 ```bash
-python scripts/predict_mm_yolo.py \
-  --weights runs/detect/mm_yolo_rgbt/weights/best.pt \
-  --rgb data/rgbt_smoke/images/val/rgb \
-  --thermal data/rgbt_smoke/images/val/thermal \
+python scripts/predict_attention.py \
+  --source data/fasdd_smoke_composite/images/val \
   --conf 0.15 \
-  --out runs/pred_mm_yolo
+  --out runs/pred_attention
 ```
 
-`--unfreeze-rgb` and `--unfreeze-head` train those copied weights as well. `--no-composite` resizes the raw pair instead of building the composite tile.
+Pass `--force` to `train_attention.py` only when you want a new attention run on top of an existing checkpoint.
